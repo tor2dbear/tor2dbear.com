@@ -1,0 +1,13 @@
+{
+  "$comment": "There is still no build step — the repo root IS the served bundle. This file exists only to pin the wrangler version Workers Builds uses when it runs the deploy command in Cloudflare's build container; without it, npx resolves whatever is latest that day.",
+  "name": "tor2dbear-com",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "versions:upload": "wrangler versions upload"
+  },
+  "devDependencies": {
+    "wrangler": "^4.30.0"
+  }
+}
