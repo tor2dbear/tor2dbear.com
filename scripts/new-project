@@ -289,6 +289,22 @@ the fleet convention."
     --source "$TARGET" --remote origin --push \
     --description "$BLURB" --homepage "https://$SLUG.$ZONE"
   info "pushed main"
+
+  # GitHub makes the first branch pushed to an empty repo the default, and
+  # Cloudflare inherits that as the production branch. `main` is the only branch
+  # we push, so this should always hold — assert it anyway, because getting it
+  # wrong means merges to main deploy nothing and it is invisible until then.
+  if ! $DRY_RUN; then
+    default="$(gh repo view "tor2dbear/$SLUG" --json defaultBranchRef \
+      --jq .defaultBranchRef.name 2>/dev/null || echo "?")"
+    if [[ "$default" == "main" ]]; then
+      info "default branch is main"
+    else
+      warn "Default branch is '$default', not main. Fix it before connecting"
+      warn "Cloudflare, or production will build from the wrong branch:"
+      warn "  gh repo edit tor2dbear/$SLUG --default-branch main"
+    fi
+  fi
 fi
 
 # -------------------------------------------------------------------- deploy --

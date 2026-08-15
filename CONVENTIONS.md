@@ -65,9 +65,33 @@ develop on a branch  →  Cloudflare preview URL  →  open a PR  →  review
 - **Production branch is `main`.** Merging to `main` deploys production.
 - **Non-production branches get preview URLs**, never touch production.
 - Custom domain always points at the **production** deployment.
-- For static-assets Workers, enable this in **Workers & Pages → (project) → Settings →
-  Builds**: production branch `main` with deploy command `npx wrangler deploy`, and
-  "Non-production branch builds" with version command `npx wrangler versions upload`.
+
+For static-assets Workers this comes from **Workers Builds** — the Worker connected to
+the GitHub repo. Set it up at creation: **Workers & Pages → Create application → Import
+a repository**, then
+
+| Field | Value |
+| --- | --- |
+| Project name | must equal `name` in `wrangler.jsonc`, or the build fails |
+| Production branch | `main` |
+| Build command | empty, unless the project has a build step |
+| Deploy command | `npx wrangler deploy` |
+| Builds for non-production branches | on — defaults to `npx wrangler versions upload` |
+
+Three things that cost us time on the workshop repo, so check them:
+
+- **The production branch defaults to the repo's default branch on GitHub.** GitHub makes
+  the *first branch pushed to an empty repo* the default — which is not necessarily `main`.
+  If that happened, production silently builds from a feature branch and merges to `main`
+  deploy nothing. Fix on both sides: GitHub → Settings → General → Default branch, and
+  Cloudflare → Settings → Build → Branch control.
+- **Pin wrangler in `package.json`, even with no build step.** The deploy command runs
+  `npx wrangler` inside Cloudflare's build container, which resolves whatever is latest
+  that day unless a `devDependencies` entry pins it.
+- **The custom domain really does come from `routes`.** Verified on `tor2dbear.com`: the
+  first deploy created the Custom Domain and its DNS record with no dashboard step. An
+  existing `TXT` on the same name (e.g. site verification) does not block it; an existing
+  `A`/`AAAA`/`CNAME` does.
 
 ## Repo hygiene
 
@@ -76,6 +100,7 @@ Every project repo should carry:
 - `README.md` — what it is, how to run it locally.
 - `roadmap/` — the roadmap pucks (see below). A project isn't "set up" without it.
 - A committed deploy config when it's a static-assets Worker (`wrangler.jsonc`).
+- `package.json` pinning `wrangler`, so Workers Builds does not float the version.
 - `CLAUDE.md` — agent notes, when the project has agent-run workflows.
 
 ## Roadmap
