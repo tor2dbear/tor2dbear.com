@@ -1,0 +1,10 @@
+# Kept out of the served static bundle (assets.directory is the repo root).
+.git
+.gitignore
+.assetsignore
+wrangler.jsonc
+README.md
+CONVENTIONS.md
+scripts
+starter
+node_modules

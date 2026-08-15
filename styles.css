@@ -1,0 +1,222 @@
+/* tor2dbear.com — the workshop front page.
+   Theme-aware: light palette on :root, dark overrides under prefers-color-scheme.
+   No external fonts or assets — works served as static assets on Cloudflare. */
+
+:root {
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --ink: #1a1a1a;
+  --muted: #6b6b6b;
+  --line: #e3e1dc;
+  --accent: #1a1a1a;
+  --radius: 14px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0e10;
+    --surface: #17171a;
+    --ink: #f2f1ee;
+    --muted: #9a9a9f;
+    --line: #2a2a2f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: clamp(2rem, 6vw, 5rem) 1.25rem 3rem;
+}
+
+/* Masthead ---------------------------------------------------------------- */
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0 0 0.75rem;
+}
+
+.masthead h1 {
+  font-size: clamp(2.4rem, 9vw, 3.6rem);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin: 0 0 1rem;
+  font-weight: 640;
+}
+
+.lede {
+  font-size: 1.075rem;
+  color: var(--muted);
+  max-width: 46ch;
+  margin: 0 0 clamp(2rem, 6vw, 3.25rem);
+}
+
+.lede a {
+  color: var(--ink);
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+
+/* Project grid ------------------------------------------------------------ */
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  transform: translateY(-1px);
+}
+
+.card__main {
+  display: block;
+  padding: 1.15rem 1.25rem 1.1rem 1.55rem;
+  text-decoration: none;
+}
+
+.card__name {
+  font-size: 1.2rem;
+  margin: 0 0 0.3rem;
+  letter-spacing: -0.01em;
+}
+
+.card__blurb {
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+  max-width: 52ch;
+}
+
+.card__stack {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+  margin: 0;
+  opacity: 0.85;
+}
+
+.card__go {
+  position: absolute;
+  top: 1.15rem;
+  right: 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.card:hover .card__go {
+  opacity: 1;
+}
+
+.card__repo {
+  position: absolute;
+  bottom: 1.1rem;
+  right: 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 0.15rem 0.1rem;
+}
+
+.card__repo:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.card--empty {
+  padding: 1.25rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+/* Footer ------------------------------------------------------------------ */
+
+.footer {
+  margin-top: clamp(2.5rem, 8vw, 4rem);
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+}
+
+.footer nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.footer nav a:hover {
+  color: var(--ink);
+}
+
+.colophon {
+  margin: 1rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card__go {
+    transition: none;
+  }
+}

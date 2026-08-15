@@ -1,0 +1,14 @@
+{
+  // Static-assets Worker for the apex site https://tor2dbear.com.
+  //
+  // Committing this keeps the deploy config version-controlled (not dashboard-only),
+  // so production (`wrangler deploy` on main) and per-branch previews
+  // (`wrangler versions upload`) share one config — the same setup meta-matic uses.
+  // There is no build step; the repo root IS the served bundle.
+  "name": "tor2dbear-com",
+  "compatibility_date": "2026-08-15",
+  "preview_urls": true,
+  "assets": {
+    "directory": ".",
+  },
+}

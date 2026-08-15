@@ -1,0 +1,34 @@
+{
+  "$comment": "Single source of truth for the projects shown on tor2dbear.com. Add a project here and it appears on the front page. The new-project script (coming) appends to this automatically. Colors mirror roadmap/sources.json so a project reads the same everywhere.",
+  "projects": [
+    {
+      "name": "PIA",
+      "url": "https://pia.tor2dbear.com",
+      "repo": "https://github.com/tor2dbear/pia-terminal",
+      "blurb": "A Unix-flavoured terminal in the browser — filesystem, shell, editor and small apps, installable as a PWA.",
+      "color": "#38bdf8",
+      "stack": "TypeScript · Vite · Supabase · Cloudflare Pages"
+    },
+    {
+      "name": "Cadence",
+      "url": "https://cadence.tor2dbear.com",
+      "repo": "https://github.com/tor2dbear/cadence",
+      "blurb": "A motion system designer — tokens for timing and easing, not another easing toy.",
+      "color": "#f472b6",
+      "stack": "Vanilla JS · Cloudflare Pages"
+    },
+    {
+      "name": "Méta-Matic ∞",
+      "url": "https://meta-matic.tor2dbear.com",
+      "repo": "https://github.com/tor2dbear/meta-matic",
+      "blurb": "A digital drawing machine after Tinguely — infinitely many works, never anything new.",
+      "color": "#a78bfa",
+      "stack": "Canvas · Cloudflare Worker · D1 + R2 · Stripe"
+    }
+  ],
+  "links": {
+    "portfolio": "https://www.tor-bjorn.com",
+    "roadmap": "https://github.com/tor2dbear/roadmap",
+    "github": "https://github.com/tor2dbear"
+  }
+}
