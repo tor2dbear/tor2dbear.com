@@ -125,18 +125,23 @@ It does the whole checklist:
 
 1. Scaffolds from `starter/` — Vite + TypeScript + Vitest, `wrangler.jsonc`, `roadmap/`,
    README — substituting the slug, name, blurb and accent color throughout.
-2. Creates `tor2dbear/<slug>` on GitHub and pushes `main`.
-3. Builds and runs `wrangler deploy`. The generated `wrangler.jsonc` declares
-   `routes: [{ pattern: "<slug>.tor2dbear.com", custom_domain: true }]`, so the first
-   deploy creates the custom domain and its DNS record — no dashboard visit.
+2. Verifies the scaffold installs, tests and builds, before anything remote exists.
+3. Creates `tor2dbear/<slug>` on GitHub, pushes `main`, and asserts `main` really is the
+   default branch.
 4. Opens a PR against this repo adding the project to `projects.json` (front page).
 5. Opens a PR against `tor2dbear/roadmap` adding it to `sources.json` (the board).
+6. Prints the [Import a repository](#the-deploy-flow-both-patterns) settings to finish
+   with.
 
-Cloudflare is driven through the **`wrangler` CLI** and your existing `wrangler login`;
-no API token or account/zone id is stored in any repo. Run `--dry-run` first to see the
-whole run without touching anything remote, and `--help` for the flags
-(`--color`, `--dir`, `--private`, `--skip-deploy`, …).
+Run `--dry-run` first to see the whole run without touching anything remote, and
+`--help` for the flags (`--color`, `--dir`, `--private`, `--skip-register`, …).
 
-Two things are still yours afterwards: merging the two pull requests, and enabling
-non-production branch builds in the dashboard (see [the deploy
-flow](#the-deploy-flow-both-patterns)) so branches get preview URLs.
+**Why the script does not deploy.** It could run `wrangler deploy` and have the site
+live a minute sooner — but that Worker would not be connected to the repo, so nothing
+would build on push and there would be no preview URLs, which is the whole flow above.
+Connecting a repo requires Cloudflare's GitHub App, an OAuth install that cannot be
+automated headlessly, so one dashboard visit per project is unavoidable. The import
+flow spends that visit well: it creates the Worker, deploys it, claims the custom
+domain from `routes`, and turns on branch builds together.
+
+Yours afterwards: the import, and merging the two pull requests.

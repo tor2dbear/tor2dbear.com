@@ -29,13 +29,17 @@ starter/            the template new projects are scaffolded from
 ./scripts/new-project <slug> --name "Name" --blurb "One line."
 ```
 
-Scaffolds from `starter/`, creates `tor2dbear/<slug>`, deploys it to Cloudflare
-(which also claims `<slug>.tor2dbear.com`), and opens the two pull requests that
-list it on the front page and the roadmap board. `--dry-run` shows the whole run
-without touching anything remote; `--help` lists the flags.
+Scaffolds from `starter/`, checks that it installs, tests and builds, creates
+`tor2dbear/<slug>`, and opens the two pull requests that list it on the front page
+and the roadmap board. It finishes by printing the Cloudflare **Import a
+repository** settings to paste in. `--dry-run` shows the whole run without
+touching anything remote; `--help` lists the flags.
 
-Cloudflare is driven through the `wrangler` CLI using your existing
-`wrangler login` — no API token and no account or zone ids live in this repo.
+That last step is a dashboard visit on purpose. Connecting a repo to a Worker
+needs Cloudflare's GitHub App, which cannot be installed headlessly — and the
+import flow deploys, claims `<slug>.tor2dbear.com` and turns on builds-on-push in
+one pass. Deploying from your laptop first would only produce a Worker with no
+CI/CD attached.
 
 ## Add an existing project to the front page
 
@@ -45,10 +49,13 @@ stack). The page reads it at runtime; no rebuild needed. (For a *new* project,
 
 ## Develop & deploy
 
-Static site, Cloudflare static-assets Worker. Follows the fleet flow: branch → preview →
-PR → merge to `main` → production. See [`CONVENTIONS.md`](CONVENTIONS.md#the-deploy-flow-both-patterns).
+Static site, Cloudflare static-assets Worker. Deploys are handled by Workers Builds:
+the `tor2dbear-com` Worker is connected to this repo, so **pushing to `main` deploys
+production** and any other branch gets a preview URL. Nothing to run by hand.
 
 ```bash
 npx wrangler dev      # local preview
-npx wrangler deploy   # production (from main)
 ```
+
+Follows the fleet flow: branch → preview → PR → merge to `main` → production. See
+[`CONVENTIONS.md`](CONVENTIONS.md#the-deploy-flow-both-patterns).

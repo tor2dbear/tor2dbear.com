@@ -5,14 +5,18 @@
 #   ./scripts/new-project <slug> [options]
 #
 # Collapses the manual checklist at the bottom of CONVENTIONS.md into one
-# command: scaffold from starter/, create the GitHub repo, deploy to Cloudflare
-# (which also claims <slug>.tor2dbear.com), and register the project on the
-# workshop front page and the roadmap board.
+# command: scaffold from starter/, create the GitHub repo, and register the
+# project on the workshop front page and the roadmap board.
 #
-# Cloudflare is driven through the wrangler CLI using the login you already
-# have — no API token, no account/zone ids in this repo. The custom domain is
-# declared in the generated wrangler.jsonc, so the first deploy creates the DNS
-# record too.
+# It deliberately does NOT deploy. Deploying from here with `wrangler deploy`
+# would produce a Worker that is not connected to the repo — no build on push,
+# no preview URLs, no branch → PR → merge → production. Connecting a repo needs
+# Cloudflare's GitHub App, an OAuth install that cannot be done headlessly, so
+# one dashboard visit per project is unavoidable. The Import a repository flow
+# does the whole thing in that one visit — creates the Worker, runs the deploy,
+# claims <slug>.tor2dbear.com from the `routes` in wrangler.jsonc, and turns on
+# branch builds. So the script hands off to it with the exact field values
+# rather than doing a worse job first.
 
 set -euo pipefail
 
@@ -86,12 +90,14 @@ Options:
   --color <#hex>      Accent color.                      (default: first unused in palette)
   --dir <path>        Where to scaffold.                 (default: ../<slug>)
   --private           Create the GitHub repo private.    (default: public)
-  --skip-github       Scaffold only; no repo, no deploy, no registration.
-  --skip-deploy       Skip the Cloudflare deploy.
+  --skip-github       Scaffold only; no repo, no registration.
   --skip-register     Skip the projects.json / sources.json pull requests.
   --dry-run           Show what would happen; scaffold to a temp dir, change nothing remote.
   -y, --yes           Don't ask for confirmation.
   -h, --help          This.
+
+The script does not deploy — it prints the Cloudflare "Import a repository"
+settings to finish with, which also wires up builds on push. See CONVENTIONS.md.
 
 Examples:
   ./scripts/new-project weft --name "Weft" --blurb "A loom for CSS grid."
@@ -103,7 +109,7 @@ USAGE
 
 SLUG=""; NAME=""; BLURB=""; STACK=""; COLOR=""; TARGET=""
 VISIBILITY="--public"
-SKIP_GITHUB=false; SKIP_DEPLOY=false; SKIP_REGISTER=false; ASSUME_YES=false
+SKIP_GITHUB=false; SKIP_REGISTER=false; ASSUME_YES=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -113,8 +119,7 @@ while [[ $# -gt 0 ]]; do
     --color)         COLOR="${2:?--color needs a value}"; shift 2 ;;
     --dir)           TARGET="${2:?--dir needs a value}"; shift 2 ;;
     --private)       VISIBILITY="--private"; shift ;;
-    --skip-github)   SKIP_GITHUB=true; SKIP_DEPLOY=true; SKIP_REGISTER=true; shift ;;
-    --skip-deploy)   SKIP_DEPLOY=true; shift ;;
+    --skip-github)   SKIP_GITHUB=true; SKIP_REGISTER=true; shift ;;
     --skip-register) SKIP_REGISTER=true; shift ;;
     --dry-run)       DRY_RUN=true; shift ;;
     -y|--yes)        ASSUME_YES=true; shift ;;
@@ -158,20 +163,16 @@ for tool in git node perl; do
 done
 
 if ! $SKIP_GITHUB; then
-  command -v gh >/dev/null 2>&1 \
-    || die "Missing gh (GitHub CLI). Install it, or re-run with --skip-github."
-  gh auth status >/dev/null 2>&1 \
-    || die "gh is not logged in. Run: gh auth login"
-  info "gh authenticated"
-fi
-
-if ! $SKIP_DEPLOY; then
-  if npx --no-install wrangler whoami >/dev/null 2>&1; then
-    info "wrangler authenticated"
-  elif npx --yes wrangler whoami >/dev/null 2>&1; then
-    info "wrangler authenticated (via npx download)"
+  # Under --dry-run these are warnings, so the whole run can be previewed from a
+  # machine that has not been set up yet.
+  if ! command -v gh >/dev/null 2>&1; then
+    $DRY_RUN && warn "gh (GitHub CLI) is not installed." \
+      || die "Missing gh (GitHub CLI). Install it, or re-run with --skip-github."
+  elif ! gh auth status >/dev/null 2>&1; then
+    $DRY_RUN && warn "gh is not logged in (gh auth login)." \
+      || die "gh is not logged in. Run: gh auth login"
   else
-    die "wrangler is not logged in. Run: npx wrangler login  — or re-run with --skip-deploy."
+    info "gh authenticated"
   fi
 fi
 
@@ -270,6 +271,23 @@ Left out: everything the project actually does. That starts with the next puck.
 EOF
 info "roadmap/ seeded with the convention doc and a first puck"
 
+# -------------------------------------------------------------------- verify --
+
+step "Verify the scaffold"
+
+# Runs before anything remote exists: a starter that does not build is worth
+# catching here rather than in a repo that has already been created, or inside
+# Cloudflare's build container ten minutes later.
+if $DRY_RUN; then
+  info "${DIM}[dry-run]${R} npm install && npm test && npm run build (in $TARGET)"
+else
+  npm --prefix "$TARGET" install --no-audit --no-fund --silent \
+    || die "npm install failed in $TARGET"
+  npm --prefix "$TARGET" test --silent || die "Tests failed in $TARGET"
+  npm --prefix "$TARGET" run build --silent || die "Build failed in $TARGET"
+  info "installs, tests and builds cleanly"
+fi
+
 # ---------------------------------------------------------------- git + repo --
 
 step "Create github.com/tor2dbear/$SLUG"
@@ -305,26 +323,6 @@ the fleet convention."
       warn "  gh repo edit tor2dbear/$SLUG --default-branch main"
     fi
   fi
-fi
-
-# -------------------------------------------------------------------- deploy --
-
-step "Deploy to Cloudflare"
-
-if $SKIP_DEPLOY; then
-  info "skipped (--skip-deploy)"
-else
-  run npm --prefix "$TARGET" install --no-audit --no-fund
-  run npm --prefix "$TARGET" run build
-  if $DRY_RUN; then
-    info "${DIM}[dry-run]${R} npx wrangler deploy (in $TARGET)"
-  else
-    ( cd "$TARGET" && npx wrangler deploy )
-  fi
-  info "deployed — https://$SLUG.$ZONE (custom domain from wrangler.jsonc routes)"
-  info "next: Workers & Pages → $SLUG → Settings → Builds, so branches build too"
-  info "      production: main / 'npx wrangler deploy'"
-  info "      non-production: 'npx wrangler versions upload'"
 fi
 
 # ------------------------------------------------------------------ register --
@@ -425,20 +423,35 @@ step "Done"
 
 printf '\n  %s%s%s is scaffolded.\n\n    code     %s\n' "$B" "$NAME" "$R" "$TARGET"
 $SKIP_GITHUB || printf '    repo     https://github.com/tor2dbear/%s\n' "$SLUG"
-$SKIP_DEPLOY || printf '    site     https://%s.%s\n' "$SLUG" "$ZONE"
 
-printf '\n  Left for you:\n'
-n=0
 if $SKIP_GITHUB; then
-  n=$((n + 1)); printf '    %d. Create the repo and deploy — this run only scaffolded.\n' "$n"
-fi
-if ! $SKIP_REGISTER; then
-  n=$((n + 1)); printf '    %d. Merge the two pull requests above (front page + roadmap board).\n' "$n"
+  printf '\n  Nothing was pushed or deployed — this run only scaffolded.\n\n'
 else
-  n=$((n + 1)); printf '    %d. Add %s to %s projects.json and %s sources.json by hand.\n' \
-    "$n" "$SLUG" "$HUB_REPO" "$ROADMAP_REPO"
+  cat <<HANDOFF
+
+  ${B}Deploy it${R} — Workers & Pages → Create application → ${B}Import a repository${R}
+  ${DIM}https://dash.cloudflare.com/?to=/:account/workers-and-pages${R}
+
+    Repository                          tor2dbear/$SLUG
+    Project name                        $SLUG
+    Build command                       npm run build
+    Deploy command                      npx wrangler deploy
+    Builds for non-production branches  ✓ on
+    Root directory                      /
+
+  That one flow creates the Worker, deploys it, claims https://$SLUG.$ZONE from
+  the routes in wrangler.jsonc, and wires up builds on push. The project name
+  must match \`name\` in wrangler.jsonc exactly or the build fails.
+
+HANDOFF
+
+  printf '  Then:\n'
+  n=0
+  if ! $SKIP_REGISTER; then
+    n=$((n + 1)); printf '    %d. Merge the two pull requests above — front page and roadmap board.\n' "$n"
+  else
+    n=$((n + 1)); printf '    %d. Add %s to %s projects.json and %s sources.json by hand.\n' \
+      "$n" "$SLUG" "$HUB_REPO" "$ROADMAP_REPO"
+  fi
+  n=$((n + 1)); printf '    %d. Write the first real puck in roadmap/ and replace the placeholder in src/.\n\n' "$n"
 fi
-if ! $SKIP_DEPLOY; then
-  n=$((n + 1)); printf '    %d. Turn on branch builds in the Cloudflare dashboard (see above), so\n       non-production branches get preview URLs.\n' "$n"
-fi
-n=$((n + 1)); printf '    %d. Write the first real puck in roadmap/ and replace the placeholder in src/.\n\n' "$n"
