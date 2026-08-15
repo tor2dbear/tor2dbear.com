@@ -32,12 +32,14 @@ exactly what `api.tor2dbear.com` already uses in this zone.
 Steps, all in the dashboard:
 
 1. **DNS → Add record** — type `AAAA`, name `www`, address `100::`, proxy **on**.
-2. **Rules → Redirect Rules → Create rule**, or the *Redirect from www to root*
-   template if it is offered.
-   - When: hostname equals `www.tor2dbear.com`
-   - Then: dynamic redirect, status **301**
-   - Target: `concat("https://tor2dbear.com", http.request.uri.path)`
-   - Preserve query string: on
+2. **Rules → Redirect Rules → Create rule → *Redirect from WWW to root*.** The
+   template needs no edits: it matches the wildcard `https://www.*` and redirects
+   to `https://${1}`, so the captured host and path carry over. Status **301**.
+   Check *Preserve query string* is on — it sits below the fold on a phone.
+
+   A custom filter expression (`hostname eq "www.tor2dbear.com"` with a
+   `concat()` target) does the same thing with more handling, and only for this
+   one host. The wildcard covers any future `www.` in the zone. Use the template.
 3. Check `curl -sSI https://www.tor2dbear.com` returns `301` with the right
    `location`, and that the apex itself still answers `200`.
 
