@@ -1,5 +1,5 @@
 {
-  "$comment": "Single source of truth for the projects shown on tor2dbear.com. Add a project here and it appears on the front page. The new-project script (coming) appends to this automatically. Colors mirror roadmap/sources.json so a project reads the same everywhere.",
+  "$comment": "Single source of truth for the projects shown on tor2dbear.com. Add a project here and it appears on the front page; the new-project script appends to it automatically. The front page no longer renders `color` — the cards are deliberately monochrome — but it is kept in step with roadmap/sources.json, which does use it, so a project reads the same on the board.",
   "projects": [
     {
       "name": "PIA",

@@ -8,7 +8,7 @@
   --ink: #1a1a1a;
   --muted: #6b6b6b;
   --line: #e3e1dc;
-  --accent: #1a1a1a;
+  --line-strong: #c9c6bf;
   --radius: 14px;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
@@ -22,6 +22,7 @@
     --ink: #f2f1ee;
     --muted: #9a9a9f;
     --line: #2a2a2f;
+    --line-strong: #46464e;
   }
 }
 
@@ -95,32 +96,29 @@ a {
 
 .card {
   position: relative;
+  padding: 1.15rem 1.25rem 1.1rem;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   transition: border-color 0.18s ease, transform 0.18s ease;
 }
 
-.card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 14px;
-  bottom: 14px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--accent);
-}
-
 .card:hover {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  border-color: var(--line-strong);
   transform: translateY(-1px);
 }
 
 .card__main {
   display: block;
-  padding: 1.15rem 1.25rem 1.1rem 1.55rem;
   text-decoration: none;
+}
+
+/* Stretched so the whole card is the project link, without nesting anchors. */
+.card__main::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
 }
 
 .card__name {
@@ -131,12 +129,27 @@ a {
 
 .card__blurb {
   color: var(--muted);
-  margin: 0 0 0.6rem;
+  margin: 0;
   font-size: 0.95rem;
   max-width: 52ch;
 }
 
+/* Two columns, so a stack line that wraps stays in its own column instead of
+   running underneath the repo link. Bottom-aligned, so the link sits level with
+   the stack's last line however many it takes. z-index lifts it over the
+   card__main overlay. */
+.card__foot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem 1.25rem;
+  margin-top: 0.85rem;
+}
+
 .card__stack {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--mono);
   font-size: 0.74rem;
   color: var(--muted);
@@ -144,30 +157,13 @@ a {
   opacity: 0.85;
 }
 
-.card__go {
-  position: absolute;
-  top: 1.15rem;
-  right: 1.25rem;
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  color: var(--accent);
-  opacity: 0;
-  transition: opacity 0.18s ease;
-}
-
-.card:hover .card__go {
-  opacity: 1;
-}
-
 .card__repo {
-  position: absolute;
-  bottom: 1.1rem;
-  right: 1.25rem;
+  flex: 0 0 auto;
   font-family: var(--mono);
   font-size: 0.74rem;
   color: var(--muted);
   text-decoration: none;
-  padding: 0.15rem 0.1rem;
+  white-space: nowrap;
 }
 
 .card__repo:hover {
@@ -215,8 +211,7 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card,
-  .card__go {
+  .card {
     transition: none;
   }
 }

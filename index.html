@@ -31,7 +31,7 @@
         <nav>
           <a href="https://www.tor-bjorn.com">Portfolio ↗</a>
           <a href="https://github.com/tor2dbear">GitHub ↗</a>
-          <a id="roadmap-link" href="https://github.com/tor2dbear/roadmap">Roadmap ↗</a>
+          <a href="mailto:hi@tor-bjorn.com">hi@tor-bjorn.com</a>
         </nav>
         <p class="colophon">Torbjörn Hedberg · multidisciplinary designer</p>
       </footer>
@@ -40,6 +40,10 @@
     <script>
       // No build step: the front page reads projects.json at runtime so the list
       // has one source of truth (also consumed by the new-project script).
+      //
+      // The card is one big link to the project, with a second link to the repo
+      // in its foot. Nested anchors are illegal, so card__main is a sibling that
+      // covers the card through a stretched ::after, and the foot sits above it.
       fetch("projects.json")
         .then((r) => r.json())
         .then((data) => {
@@ -47,19 +51,16 @@
           for (const p of data.projects) {
             const li = document.createElement("li");
             li.className = "card";
-            li.style.setProperty("--accent", p.color);
             li.innerHTML = `
               <a class="card__main" href="${p.url}">
                 <h2 class="card__name">${p.name}</h2>
                 <p class="card__blurb">${p.blurb}</p>
-                <p class="card__stack">${p.stack}</p>
-                <span class="card__go">Open ↗</span>
               </a>
-              <a class="card__repo" href="${p.repo}" aria-label="${p.name} source on GitHub">source</a>`;
+              <div class="card__foot">
+                <p class="card__stack">${p.stack}</p>
+                <a class="card__repo" href="${p.repo}" aria-label="${p.name} source on GitHub">source ↗</a>
+              </div>`;
             list.appendChild(li);
-          }
-          if (data.links && data.links.roadmap) {
-            document.getElementById("roadmap-link").href = data.links.roadmap;
           }
         })
         .catch(() => {
