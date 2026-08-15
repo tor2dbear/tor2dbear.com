@@ -7,6 +7,7 @@ package.json
 package-lock.json
 README.md
 CONVENTIONS.md
+roadmap
 scripts
 starter
 node_modules
