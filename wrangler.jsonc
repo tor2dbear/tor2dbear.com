@@ -5,10 +5,20 @@
   // so production (`wrangler deploy` on main) and per-branch previews
   // (`wrangler versions upload`) share one config — the same setup meta-matic uses.
   // There is no build step; the repo root IS the served bundle.
+  //
+  // The `routes` entry claims the apex as a Custom Domain and lets wrangler
+  // manage its DNS record, so production is pointed from here rather than the
+  // dashboard — the same mechanism scripts/new-project relies on for every
+  // <slug>.tor2dbear.com. If the zone still has an existing record on the bare
+  // apex, the first deploy will refuse it; delete that record and re-run.
+  // `www.tor2dbear.com` is deliberately not claimed.
   "name": "tor2dbear-com",
   "compatibility_date": "2026-08-15",
   "preview_urls": true,
   "assets": {
     "directory": ".",
   },
+  "routes": [
+    { "pattern": "tor2dbear.com", "custom_domain": true },
+  ],
 }

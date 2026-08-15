@@ -1,0 +1,5 @@
+# Placeholder so roadmap/ exists in the starter.
+#
+# new-project replaces this directory's contents at scaffold time: it fetches
+# templates/roadmap-README.md from tor2dbear/roadmap (the canonical spec — never
+# duplicated here, so it cannot go stale) and writes a first `scaffold` puck.

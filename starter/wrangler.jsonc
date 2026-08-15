@@ -1,0 +1,22 @@
+{
+  // Static-assets Worker for https://{{SLUG}}.tor2dbear.com — the fleet default.
+  //
+  // Committing this keeps the deploy config version-controlled rather than
+  // dashboard-only, so production (`wrangler deploy` on main) and per-branch
+  // previews (`wrangler versions upload`) share one source of truth.
+  //
+  // `routes` with `custom_domain: true` makes wrangler create the Custom Domain
+  // and its DNS record on the tor2dbear.com zone at first deploy — that is why
+  // new-project needs no dashboard visit and no API token. Verify the record
+  // landed after the first deploy; wrangler only manages zones on the same
+  // account it is logged in to.
+  "name": "{{SLUG}}",
+  "compatibility_date": "{{DATE}}",
+  "preview_urls": true,
+  "assets": {
+    "directory": "./dist",
+  },
+  "routes": [
+    { "pattern": "{{SLUG}}.tor2dbear.com", "custom_domain": true },
+  ],
+}

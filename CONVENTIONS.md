@@ -48,7 +48,10 @@ exactly how Méta-Matic splits site from order/print API.
   "name": "<project>",
   "compatibility_date": "<yyyy-mm-dd>",
   "preview_urls": true,
-  "assets": { "directory": "." }
+  "assets": { "directory": "./dist" }, // "." when there is no build step
+  // Declaring the custom domain here means wrangler creates it and its DNS
+  // record on first deploy — the reason new-project needs no dashboard step.
+  "routes": [{ "pattern": "<project>.tor2dbear.com", "custom_domain": true }]
 }
 ```
 
@@ -87,12 +90,28 @@ a drop-in template live in the roadmap repo — **do not duplicate it here**:
 
 ## Adding a project
 
-Until the `new-project` script lands (see `scripts/`, planned), the manual checklist is:
+One command, from a checkout of this repo:
 
-1. Create `tor2dbear/<slug>` on GitHub.
-2. Copy the starter (planned: `starter/`) — index, `wrangler.jsonc`, `roadmap/`, README.
-3. First deploy to Cloudflare; point `<slug>.tor2dbear.com` at production.
-4. Add the project to this repo's `projects.json` (shows it on the workshop front page).
-5. Add it to `tor2dbear/roadmap` `sources.json` (shows it on the board).
+```bash
+./scripts/new-project <slug> --name "Name" --blurb "One line about it."
+```
 
-The script will collapse steps 1–5 into `./new-project <slug>`.
+It does the whole checklist:
+
+1. Scaffolds from `starter/` — Vite + TypeScript + Vitest, `wrangler.jsonc`, `roadmap/`,
+   README — substituting the slug, name, blurb and accent color throughout.
+2. Creates `tor2dbear/<slug>` on GitHub and pushes `main`.
+3. Builds and runs `wrangler deploy`. The generated `wrangler.jsonc` declares
+   `routes: [{ pattern: "<slug>.tor2dbear.com", custom_domain: true }]`, so the first
+   deploy creates the custom domain and its DNS record — no dashboard visit.
+4. Opens a PR against this repo adding the project to `projects.json` (front page).
+5. Opens a PR against `tor2dbear/roadmap` adding it to `sources.json` (the board).
+
+Cloudflare is driven through the **`wrangler` CLI** and your existing `wrangler login`;
+no API token or account/zone id is stored in any repo. Run `--dry-run` first to see the
+whole run without touching anything remote, and `--help` for the flags
+(`--color`, `--dir`, `--private`, `--skip-deploy`, …).
+
+Two things are still yours afterwards: merging the two pull requests, and enabling
+non-production branch builds in the dashboard (see [the deploy
+flow](#the-deploy-flow-both-patterns)) so branches get preview URLs.

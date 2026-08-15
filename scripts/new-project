@@ -1,0 +1,428 @@
+#!/usr/bin/env bash
+#
+# new-project — bootstrap a tor2dbear project end to end.
+#
+#   ./scripts/new-project <slug> [options]
+#
+# Collapses the manual checklist at the bottom of CONVENTIONS.md into one
+# command: scaffold from starter/, create the GitHub repo, deploy to Cloudflare
+# (which also claims <slug>.tor2dbear.com), and register the project on the
+# workshop front page and the roadmap board.
+#
+# Cloudflare is driven through the wrangler CLI using the login you already
+# have — no API token, no account/zone ids in this repo. The custom domain is
+# declared in the generated wrangler.jsonc, so the first deploy creates the DNS
+# record too.
+
+set -euo pipefail
+
+# ---------------------------------------------------------------- constants --
+
+readonly HUB_REPO="tor2dbear/tor2dbear.com"
+readonly ROADMAP_REPO="tor2dbear/roadmap"
+readonly ROADMAP_RAW="https://raw.githubusercontent.com/tor2dbear/roadmap/main"
+readonly ZONE="tor2dbear.com"
+
+# Accent colors, in preference order. The script picks the first one the fleet
+# is not already using so a new project reads distinctly on both boards.
+# (Not `readonly` — bash 3.2, still the /bin/bash on macOS, rejects that on arrays.)
+PALETTE=(
+  "#34d399" "#fbbf24" "#f87171" "#60a5fa" "#c084fc"
+  "#2dd4bf" "#fb923c" "#e879f9" "#a3e635" "#94a3b8"
+)
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+HUB_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+readonly HUB_ROOT
+readonly STARTER="$HUB_ROOT/starter"
+
+# ------------------------------------------------------------------ plumbing --
+
+if [[ -t 1 ]]; then
+  B=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; YEL=$'\033[33m'; GRN=$'\033[32m'; R=$'\033[0m'
+else
+  B=""; DIM=""; RED=""; YEL=""; GRN=""; R=""
+fi
+
+step() { printf '\n%s==>%s %s%s%s\n' "$GRN" "$R" "$B" "$*" "$R"; }
+info() { printf '    %s\n' "$*"; }
+warn() { printf '%s  ! %s%s\n' "$YEL" "$*" "$R" >&2; }
+die()  { printf '%s  ✗ %s%s\n' "$RED" "$*" "$R" >&2; exit 1; }
+
+DRY_RUN=false
+
+# Run a mutating command — or just show it, under --dry-run.
+run() {
+  if $DRY_RUN; then
+    printf '    %s[dry-run]%s %s\n' "$DIM" "$R" "$*"
+    return 0
+  fi
+  "$@"
+}
+
+TMPDIRS=()
+cleanup() { for d in ${TMPDIRS+"${TMPDIRS[@]}"}; do rm -rf "$d"; done; }
+trap cleanup EXIT
+
+mktempdir() {
+  local d
+  d="$(mktemp -d)"
+  TMPDIRS+=("$d")
+  printf '%s' "$d"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: ./scripts/new-project <slug> [options]
+
+  <slug>              lowercase, hyphenated. Becomes the repo name, the worker
+                      name and <slug>.tor2dbear.com.
+
+Options:
+  --name <name>       Display name on the boards.        (default: slug, title-cased)
+  --blurb <text>      One-line description.              (default: a TODO placeholder)
+  --stack <text>      Stack line for the workshop card.  (default: the starter's stack)
+  --color <#hex>      Accent color.                      (default: first unused in palette)
+  --dir <path>        Where to scaffold.                 (default: ../<slug>)
+  --private           Create the GitHub repo private.    (default: public)
+  --skip-github       Scaffold only; no repo, no deploy, no registration.
+  --skip-deploy       Skip the Cloudflare deploy.
+  --skip-register     Skip the projects.json / sources.json pull requests.
+  --dry-run           Show what would happen; scaffold to a temp dir, change nothing remote.
+  -y, --yes           Don't ask for confirmation.
+  -h, --help          This.
+
+Examples:
+  ./scripts/new-project weft --name "Weft" --blurb "A loom for CSS grid."
+  ./scripts/new-project weft --dry-run
+USAGE
+}
+
+# ------------------------------------------------------------------- options --
+
+SLUG=""; NAME=""; BLURB=""; STACK=""; COLOR=""; TARGET=""
+VISIBILITY="--public"
+SKIP_GITHUB=false; SKIP_DEPLOY=false; SKIP_REGISTER=false; ASSUME_YES=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --name)          NAME="${2:?--name needs a value}"; shift 2 ;;
+    --blurb)         BLURB="${2:?--blurb needs a value}"; shift 2 ;;
+    --stack)         STACK="${2:?--stack needs a value}"; shift 2 ;;
+    --color)         COLOR="${2:?--color needs a value}"; shift 2 ;;
+    --dir)           TARGET="${2:?--dir needs a value}"; shift 2 ;;
+    --private)       VISIBILITY="--private"; shift ;;
+    --skip-github)   SKIP_GITHUB=true; SKIP_DEPLOY=true; SKIP_REGISTER=true; shift ;;
+    --skip-deploy)   SKIP_DEPLOY=true; shift ;;
+    --skip-register) SKIP_REGISTER=true; shift ;;
+    --dry-run)       DRY_RUN=true; shift ;;
+    -y|--yes)        ASSUME_YES=true; shift ;;
+    -h|--help)       usage; exit 0 ;;
+    -*)              die "Unknown option: $1  (--help for usage)" ;;
+    *)
+      [[ -z "$SLUG" ]] || die "Only one slug, got '$SLUG' and '$1'."
+      SLUG="$1"; shift ;;
+  esac
+done
+
+[[ -n "$SLUG" ]] || { usage >&2; exit 1; }
+
+[[ "$SLUG" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
+  || die "Slug must be lowercase and hyphenated (got '$SLUG'). CONVENTIONS.md: 'meta-matic', not 'MetaMatic'."
+
+# Not `readonly` — it is re-exported as a command prefix during substitution.
+DATE="$(date +%F)"
+
+if [[ -z "$NAME" ]]; then
+  # weft-loom → Weft Loom
+  NAME="$(printf '%s' "$SLUG" | tr '-' ' ' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1')"
+fi
+[[ -n "$BLURB" ]] || BLURB="TODO: one line on what $NAME is."
+[[ -n "$STACK" ]] || STACK="TypeScript · Vite · Cloudflare Worker (static assets)"
+
+if $DRY_RUN && [[ -z "$TARGET" ]]; then
+  TARGET="$(mktempdir)/$SLUG"
+elif [[ -z "$TARGET" ]]; then
+  TARGET="$(cd -- "$HUB_ROOT/.." && pwd)/$SLUG"
+fi
+
+# ------------------------------------------------------------------ preflight --
+
+step "Preflight"
+
+[[ -d "$STARTER" ]] || die "No starter/ at $STARTER — is this the workshop repo?"
+
+for tool in git node perl; do
+  command -v "$tool" >/dev/null 2>&1 || die "Missing required tool: $tool"
+done
+
+if ! $SKIP_GITHUB; then
+  command -v gh >/dev/null 2>&1 \
+    || die "Missing gh (GitHub CLI). Install it, or re-run with --skip-github."
+  gh auth status >/dev/null 2>&1 \
+    || die "gh is not logged in. Run: gh auth login"
+  info "gh authenticated"
+fi
+
+if ! $SKIP_DEPLOY; then
+  if npx --no-install wrangler whoami >/dev/null 2>&1; then
+    info "wrangler authenticated"
+  elif npx --yes wrangler whoami >/dev/null 2>&1; then
+    info "wrangler authenticated (via npx download)"
+  else
+    die "wrangler is not logged in. Run: npx wrangler login  — or re-run with --skip-deploy."
+  fi
+fi
+
+if [[ -e "$TARGET" ]]; then
+  [[ -z "$(ls -A "$TARGET" 2>/dev/null)" ]] || die "$TARGET exists and is not empty."
+fi
+
+# Pick an accent color no fleet project is using yet.
+if [[ -z "$COLOR" ]]; then
+  COLOR="$(node - "$HUB_ROOT/projects.json" "${PALETTE[@]}" <<'NODE'
+const fs = require("fs");
+const [file, ...palette] = process.argv.slice(2);
+let used = new Set();
+try {
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  used = new Set((data.projects || []).map((p) => String(p.color || "").toLowerCase()));
+} catch {}
+process.stdout.write(palette.find((c) => !used.has(c.toLowerCase())) || palette[0]);
+NODE
+)"
+fi
+[[ "$COLOR" =~ ^#[0-9a-fA-F]{6}$ ]] || die "Color must be a #rrggbb hex value (got '$COLOR')."
+
+cat <<SUMMARY
+
+  ${B}$NAME${R}  ${DIM}($SLUG)${R}
+  ${DIM}blurb  ${R}$BLURB
+  ${DIM}stack  ${R}$STACK
+  ${DIM}color  ${R}$COLOR
+  ${DIM}dir    ${R}$TARGET
+  ${DIM}repo   ${R}github.com/tor2dbear/$SLUG $([[ "$VISIBILITY" == "--private" ]] && echo "(private)" || echo "(public)")
+  ${DIM}url    ${R}https://$SLUG.$ZONE
+
+SUMMARY
+
+if ! $ASSUME_YES && ! $DRY_RUN; then
+  read -r -p "  Go? [y/N] " reply
+  [[ "$reply" =~ ^[Yy]$ ]] || die "Aborted."
+fi
+
+# ------------------------------------------------------------------ scaffold --
+
+step "Scaffold from starter/"
+
+mkdir -p "$TARGET"
+# Copy contents including dotfiles, without depending on shell globbing rules.
+(cd "$STARTER" && tar cf - .) | (cd "$TARGET" && tar xf -)
+rm -f "$TARGET/roadmap/.gitkeep"
+
+# HTML gets an escaped blurb so quotes and angle brackets can't break markup.
+BLURB_HTML="$(printf '%s' "$BLURB" | perl -pe 's/&/&amp;/g; s/</&lt;/g; s/>/&gt;/g; s/"/&quot;/g')"
+
+while IFS= read -r -d '' file; do
+  if [[ "$file" == *.html ]]; then
+    SLUG="$SLUG" NAME="$NAME" BLURB="$BLURB_HTML" STACK="$STACK" COLOR="$COLOR" DATE="$DATE" \
+      perl -pi -e 's/\{\{(SLUG|NAME|BLURB|STACK|COLOR|DATE)\}\}/$ENV{$1}/g' "$file"
+  else
+    SLUG="$SLUG" NAME="$NAME" BLURB="$BLURB" STACK="$STACK" COLOR="$COLOR" DATE="$DATE" \
+      perl -pi -e 's/\{\{(SLUG|NAME|BLURB|STACK|COLOR|DATE)\}\}/$ENV{$1}/g' "$file"
+  fi
+done < <(find "$TARGET" -type f -print0)
+
+info "wrote $(find "$TARGET" -type f | wc -l | tr -d ' ') files to $TARGET"
+
+# The roadmap convention doc is fetched, never vendored, so it cannot go stale.
+if curl -fsSL "$ROADMAP_RAW/templates/roadmap-README.md" -o "$TARGET/roadmap/README.md" 2>/dev/null; then
+  info "roadmap/README.md fetched from $ROADMAP_REPO"
+else
+  warn "Could not fetch the roadmap convention; writing a pointer instead."
+  cat > "$TARGET/roadmap/README.md" <<EOF
+# Roadmap
+
+One markdown file per item (a "puck") with YAML frontmatter. The canonical spec:
+https://github.com/tor2dbear/roadmap/blob/main/CONVENTION.md
+EOF
+fi
+
+cat > "$TARGET/roadmap/scaffold.md" <<EOF
+---
+title: "Scaffold $NAME"
+status: done
+tags: [setup]
+updated: $DATE
+---
+
+## Goal
+Get $NAME from nothing to a deployed skeleton on https://$SLUG.$ZONE.
+
+## Delivered
+Scaffolded by \`new-project\` from the workshop starter: Vite + TypeScript +
+Vitest, a static-assets Worker with the custom domain declared in
+\`wrangler.jsonc\`, and this roadmap. Listed on the workshop front page and the
+roadmap board.
+
+Left out: everything the project actually does. That starts with the next puck.
+EOF
+info "roadmap/ seeded with the convention doc and a first puck"
+
+# ---------------------------------------------------------------- git + repo --
+
+step "Create github.com/tor2dbear/$SLUG"
+
+if $SKIP_GITHUB; then
+  info "skipped (--skip-github)"
+else
+  run git -C "$TARGET" init -q
+  run git -C "$TARGET" add -A
+  run git -C "$TARGET" commit -q -m "Scaffold $NAME
+
+Bootstrapped by tor2dbear.com/scripts/new-project: Vite + TypeScript + Vitest,
+a static-assets Worker serving dist/ on $SLUG.$ZONE, and a roadmap/ following
+the fleet convention."
+  run git -C "$TARGET" branch -M main
+  run gh repo create "tor2dbear/$SLUG" "$VISIBILITY" \
+    --source "$TARGET" --remote origin --push \
+    --description "$BLURB" --homepage "https://$SLUG.$ZONE"
+  info "pushed main"
+fi
+
+# -------------------------------------------------------------------- deploy --
+
+step "Deploy to Cloudflare"
+
+if $SKIP_DEPLOY; then
+  info "skipped (--skip-deploy)"
+else
+  run npm --prefix "$TARGET" install --no-audit --no-fund
+  run npm --prefix "$TARGET" run build
+  if $DRY_RUN; then
+    info "${DIM}[dry-run]${R} npx wrangler deploy (in $TARGET)"
+  else
+    ( cd "$TARGET" && npx wrangler deploy )
+  fi
+  info "deployed — https://$SLUG.$ZONE (custom domain from wrangler.jsonc routes)"
+  info "next: Workers & Pages → $SLUG → Settings → Builds, so branches build too"
+  info "      production: main / 'npx wrangler deploy'"
+  info "      non-production: 'npx wrangler versions upload'"
+fi
+
+# ------------------------------------------------------------------ register --
+
+# Clone a repo shallowly, apply a node transform to one JSON file, and open a PR.
+# Done in a throwaway clone so the caller's working tree is never touched.
+register_in_repo() {
+  local repo="$1" file="$2" transform="$3" title="$4" body="$5"
+  local dir branch
+  dir="$(mktempdir)/$(basename "$repo")"
+  branch="add-$SLUG"
+
+  git clone --depth 1 -q "https://github.com/$repo.git" "$dir" \
+    || { warn "Could not clone $repo — register $SLUG by hand."; return 1; }
+
+  local rc=0
+  SLUG="$SLUG" NAME="$NAME" BLURB="$BLURB" STACK="$STACK" COLOR="$COLOR" \
+    node -e "$transform" "$dir/$file" || rc=$?
+  if [[ $rc -eq 3 ]]; then
+    info "$repo already lists $SLUG — nothing to do"
+    return 0
+  elif [[ $rc -ne 0 ]]; then
+    warn "Could not update $repo/$file — register $SLUG by hand."
+    return 1
+  fi
+
+  git -C "$dir" checkout -q -b "$branch"
+  git -C "$dir" commit -q -am "$title"
+  run git -C "$dir" push -q -u origin "$branch" \
+    || { warn "Could not push to $repo — register $SLUG by hand."; return 1; }
+  if $DRY_RUN; then
+    info "${DIM}[dry-run]${R} gh pr create --repo $repo --head $branch"
+    git -C "$dir" --no-pager show --no-color --format= HEAD | sed 's/^/      /'
+    return 0
+  fi
+  gh pr create --repo "$repo" --head "$branch" --title "$title" --body "$body" \
+    || { warn "Pushed $branch to $repo but could not open the PR — open it by hand."; return 1; }
+}
+
+readonly ADD_TO_PROJECTS='
+const fs = require("fs");
+const file = process.argv[1];
+const d = JSON.parse(fs.readFileSync(file, "utf8"));
+const url = `https://${process.env.SLUG}.tor2dbear.com`;
+if ((d.projects || []).some((p) => p.url === url)) process.exit(3);
+d.projects.push({
+  name: process.env.NAME,
+  url,
+  repo: `https://github.com/tor2dbear/${process.env.SLUG}`,
+  blurb: process.env.BLURB,
+  color: process.env.COLOR,
+  stack: process.env.STACK,
+});
+fs.writeFileSync(file, JSON.stringify(d, null, 2) + "\n");
+'
+
+readonly ADD_TO_SOURCES='
+const fs = require("fs");
+const file = process.argv[1];
+const d = JSON.parse(fs.readFileSync(file, "utf8"));
+const repo = `tor2dbear/${process.env.SLUG}`;
+if ((d.sources || []).some((s) => s.repo === repo)) process.exit(3);
+d.sources.push({
+  repo,
+  name: process.env.NAME,
+  blurb: process.env.BLURB,
+  color: process.env.COLOR,
+  adapter: "pucks",
+  path: "roadmap",
+});
+fs.writeFileSync(file, JSON.stringify(d, null, 2) + "\n");
+'
+
+step "Register $NAME on the boards"
+
+if $SKIP_REGISTER; then
+  info "skipped (--skip-register)"
+else
+  register_in_repo "$HUB_REPO" "projects.json" "$ADD_TO_PROJECTS" \
+    "Add $NAME to the workshop front page" \
+    "Adds \`$SLUG\` to \`projects.json\`, so it appears on tor2dbear.com.
+
+- Site: https://$SLUG.$ZONE
+- Source: https://github.com/tor2dbear/$SLUG
+
+Opened by \`scripts/new-project\`." || true
+
+  register_in_repo "$ROADMAP_REPO" "sources.json" "$ADD_TO_SOURCES" \
+    "Add $NAME to the roadmap board" \
+    "Adds \`tor2dbear/$SLUG\` as a \`pucks\` source, reading its \`roadmap/\` directory.
+
+Opened by \`scripts/new-project\` in the workshop repo." || true
+fi
+
+# ---------------------------------------------------------------------- done --
+
+step "Done"
+
+printf '\n  %s%s%s is scaffolded.\n\n    code     %s\n' "$B" "$NAME" "$R" "$TARGET"
+$SKIP_GITHUB || printf '    repo     https://github.com/tor2dbear/%s\n' "$SLUG"
+$SKIP_DEPLOY || printf '    site     https://%s.%s\n' "$SLUG" "$ZONE"
+
+printf '\n  Left for you:\n'
+n=0
+if $SKIP_GITHUB; then
+  n=$((n + 1)); printf '    %d. Create the repo and deploy — this run only scaffolded.\n' "$n"
+fi
+if ! $SKIP_REGISTER; then
+  n=$((n + 1)); printf '    %d. Merge the two pull requests above (front page + roadmap board).\n' "$n"
+else
+  n=$((n + 1)); printf '    %d. Add %s to %s projects.json and %s sources.json by hand.\n' \
+    "$n" "$SLUG" "$HUB_REPO" "$ROADMAP_REPO"
+fi
+if ! $SKIP_DEPLOY; then
+  n=$((n + 1)); printf '    %d. Turn on branch builds in the Cloudflare dashboard (see above), so\n       non-production branches get preview URLs.\n' "$n"
+fi
+n=$((n + 1)); printf '    %d. Write the first real puck in roadmap/ and replace the placeholder in src/.\n\n' "$n"

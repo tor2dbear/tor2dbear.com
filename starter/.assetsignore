@@ -1,0 +1,3 @@
+# The served bundle is ./dist, which contains only build output, so there is
+# nothing to strip here yet. Kept so the file exists the day assets.directory
+# moves to the repo root — mirror the workshop's .assetsignore then.
