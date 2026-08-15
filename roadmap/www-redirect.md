@@ -1,6 +1,6 @@
 ---
 title: "Redirect www to the apex"
-status: next
+status: done
 tags: [infra]
 updated: 2026-08-15
 ---
@@ -43,9 +43,34 @@ Steps, all in the dashboard:
 3. Check `curl -sSI https://www.tor2dbear.com` returns `301` with the right
    `location`, and that the apex itself still answers `200`.
 
+## Delivered
+
+Both steps, in the dashboard. `AAAA www → 100::` proxied, then the *Redirect
+from WWW to root* template deployed unmodified.
+
+Verified from outside:
+
+| | |
+| --- | --- |
+| `www.tor2dbear.com` | 301 → `https://tor2dbear.com/` |
+| Path | `/projects.json` carried over |
+| Query | `?utm_source=test&x=1` intact |
+| Following the redirect | 200 on the target |
+| Apex direct | 200, unaffected |
+
+One thing worth remembering: between the two steps `www` answered **522**. That
+is the expected intermediate state, not a fault — the record resolves, so
+Cloudflare tries to proxy to `100::`, which discards it. Once the rule is live
+the edge answers 301 before it ever reaches for an origin. Anyone adding a
+proxied placeholder record without a rule behind it will see the same.
+
+The wildcard template beat the hand-written filter expression: it needed no
+edits and covers any future `www.` host in the zone rather than one name.
+
 ## Open questions
-- Should the same rule exist for every project subdomain (`www.pia.…`)? Probably
-  not worth it — nobody types `www.` in front of a subdomain.
+- Should the same rule exist for every project subdomain (`www.pia.…`)? The
+  wildcard already covers them if they ever get a proxied record — nothing more
+  to do unless one is added.
 - If the portfolio moves to Cloudflare, does `tor-bjorn.com` want the inverse
   (apex → `www`, which is where it lives today)? That reverses the canonical
   direction and should be decided once, for both domains.
