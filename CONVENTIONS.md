@@ -12,11 +12,12 @@ their own repos (see [Roadmap](#roadmap) below); this file is the cross-cutting 
 | PIA | `pia.tor2dbear.com` | `tor2dbear/pia-terminal` | Cloudflare Pages + Supabase |
 | Cadence | `cadence.tor2dbear.com` | `tor2dbear/cadence` | Cloudflare Pages |
 | Méta-Matic ∞ | `meta-matic.tor2dbear.com` | `tor2dbear/meta-matic` | Cloudflare Worker (static assets) + `api/` Worker (D1 + R2) |
-| Roadmap | _(board)_ | `tor2dbear/roadmap` | GitHub Pages _(to move to CF)_ |
+| Roadmap | `roadmap.tor2dbear.com` | `tor2dbear/roadmap` | Cloudflare Worker (static assets) |
 | Workshop | `tor2dbear.com` | `tor2dbear/tor2dbear.com` | Cloudflare Worker (static assets) |
 
 **Cloudflare is the house standard.** New projects go on Cloudflare. Netlify (portfolio)
-and GitHub Pages (roadmap) are legacy and slated to move.
+is the last legacy host, slated to move. (Roadmap moved off GitHub Pages to a
+Cloudflare Worker at `roadmap.tor2dbear.com`.)
 
 ## Domains
 
@@ -110,7 +111,8 @@ markdown file per item (a "puck") with YAML frontmatter, under `roadmap/`. The f
 a drop-in template live in the roadmap repo — **do not duplicate it here**:
 
 - Spec: [`tor2dbear/roadmap` → `CONVENTION.md`](https://github.com/tor2dbear/roadmap/blob/main/CONVENTION.md)
-- The board aggregates PIA, Cadence and Méta-Matic today; adding a project is a line in
+- The board aggregates every project in the fleet — PIA, Cadence, Méta-Matic, the
+  portfolio, this workshop, and the roadmap repo itself; adding a project is a line in
   that repo's `sources.json`.
 
 ## Adding a project
