@@ -116,6 +116,30 @@ and replicates the same flow:
 Reference implementation: `tor2dbear/roadmap` → `.github/workflows/sync.yml` (deploy) +
 `pr-preview.yml` (gate + preview).
 
+### The merge gate
+
+Workers Builds proves a change **deploys**; it does not prove the change is **correct**.
+A repo with no build step has nothing else standing between a typo and production, so
+every project also carries a checks-only `pull_request` workflow — no secrets, so it runs
+on fork PRs too, and no deploy logic, because Workers Builds already owns that.
+
+What the workshop gates on, as the pattern to copy:
+
+- **Runtime-fetched data** (`projects.json`) — valid JSON, and every field the page
+  interpolates is present. A missing one renders the string `undefined` into a card
+  instead of failing; a malformed file degrades the whole page to "Projects list
+  unavailable", and nothing else would notice.
+- **Puck frontmatter** — required keys, a known `status`, a `YYYY-MM-DD` date. This one
+  matters most: the aggregator gates on `source(s) failed to harvest`, so a bad puck here
+  turns **`tor2dbear/roadmap`** red rather than this repo. Validate at the source.
+- **Shell scripts parse** and are executable.
+- **The template still works** — `new-project` scaffolds, installs, tests and builds a
+  throwaway project. `starter/` is run by nobody until someone creates a project, so it
+  rots silently as dependencies drift, and `new-project`'s own verification comes too
+  late: you find out halfway through bootstrapping a repo.
+
+The same checks run locally: `./scripts/check` (add `--starter` for the slow one).
+
 ## Repo hygiene
 
 Every project repo should carry:
@@ -124,6 +148,7 @@ Every project repo should carry:
 - `roadmap/` — the roadmap pucks (see below). A project isn't "set up" without it.
 - A committed deploy config when it's a static-assets Worker (`wrangler.jsonc`).
 - `package.json` pinning `wrangler`, so Workers Builds does not float the version.
+- A checks-only `pull_request` workflow — the merge gate above.
 - `CLAUDE.md` — agent notes, when the project has agent-run workflows.
 
 ## Roadmap

@@ -1,0 +1,52 @@
+name: PR checks
+
+# The merge gate. There is no build step in this repo, so without this nothing
+# would notice a malformed projects.json (the front page fetches it at runtime
+# and silently degrades to "Projects list unavailable") or a puck the roadmap
+# aggregator can't parse — that one fails in tor2dbear/roadmap's gate rather
+# than here, so it has to be caught at the source.
+#
+# Deploys and preview URLs are NOT this workflow's job: the Worker is connected
+# to this repo through Workers Builds, which already deploys main and gives every
+# branch a preview URL with a sticky PR comment. See CONVENTIONS.md — the
+# Actions-driven deploy is an exception for repos that build their content in CI.
+#
+# No secrets are used, so this runs on fork PRs too.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Data + scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: ./scripts/check
+
+  starter:
+    name: Starter scaffolds and builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # starter/ is a template nobody runs until someone creates a project, so it
+      # rots silently as dependencies drift. new-project verifies it at run time,
+      # which is too late — you find out halfway through bootstrapping a repo.
+      # --skip-github keeps the whole run local: no repo, no deploy, no PRs.
+      - run: ./scripts/check --starter

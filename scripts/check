@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+#
+# check — the merge gate, runnable by hand.
+#
+#   ./scripts/check              fast checks (a second or two)
+#   ./scripts/check --starter    also scaffold a throwaway project and build it
+#
+# There is no build step here, so nothing else would notice a malformed
+# projects.json (the front page fetches it at runtime and silently degrades) or a
+# puck whose frontmatter the roadmap aggregator can't parse. That second one
+# fails in the *other* repo — tor2dbear/roadmap gates on "source(s) failed to
+# harvest" — so it has to be caught at the source, here.
+
+set -euo pipefail
+
+cd -- "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ -t 1 ]]; then
+  RED=$'\033[31m'; GRN=$'\033[32m'; B=$'\033[1m'; R=$'\033[0m'
+else
+  RED=""; GRN=""; B=""; R=""
+fi
+
+FAILED=0
+ok()   { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
+bad()  { printf '  %s✗%s %s\n' "$RED" "$R" "$*"; FAILED=1; }
+head_() { printf '\n%s%s%s\n' "$B" "$*" "$R"; }
+
+WITH_STARTER=false
+[[ "${1:-}" == "--starter" ]] && WITH_STARTER=true
+
+# ------------------------------------------------------------- projects.json --
+
+head_ "projects.json"
+
+if out="$(node - projects.json <<'NODE'
+const fs = require("fs");
+const file = process.argv[2]; // node - <file>: argv is [node, "-", file]
+const raw = fs.readFileSync(file, "utf8");
+
+let d;
+try { d = JSON.parse(raw); } catch (e) { console.log("ERR invalid JSON: " + e.message); process.exit(1); }
+
+const errs = [];
+if (!Array.isArray(d.projects)) errs.push("`projects` is not an array");
+
+const seen = new Set();
+for (const [i, p] of (d.projects || []).entries()) {
+  const at = `projects[${i}]${p && p.name ? ` (${p.name})` : ""}`;
+  // Every field the front page interpolates into a card. A missing one renders
+  // the literal string "undefined" rather than failing loudly.
+  for (const k of ["name", "url", "repo", "blurb", "color", "stack"]) {
+    if (typeof p?.[k] !== "string" || !p[k].trim()) errs.push(`${at}: missing or empty \`${k}\``);
+  }
+  if (typeof p?.url === "string") {
+    if (!/^https:\/\/[a-z0-9]+(-[a-z0-9]+)*\.tor2dbear\.com\/?$/.test(p.url))
+      errs.push(`${at}: url should be https://<slug>.tor2dbear.com — got ${p.url}`);
+    if (seen.has(p.url)) errs.push(`${at}: duplicate url ${p.url}`);
+    seen.add(p.url);
+  }
+  if (typeof p?.repo === "string" && !/^https:\/\/github\.com\/tor2dbear\/[\w.-]+$/.test(p.repo))
+    errs.push(`${at}: repo should be https://github.com/tor2dbear/<name> — got ${p.repo}`);
+  if (typeof p?.color === "string" && !/^#[0-9a-fA-F]{6}$/.test(p.color))
+    errs.push(`${at}: color should be #rrggbb — got ${p.color}`);
+}
+
+for (const k of ["portfolio", "github"]) {
+  if (typeof d.links?.[k] !== "string") errs.push(`links.${k} is missing`);
+}
+
+if (errs.length) { for (const e of errs) console.log("ERR " + e); process.exit(1); }
+console.log("OK " + d.projects.length + " projects, all fields present");
+NODE
+)"; then ok "${out#OK }"; else printf '%s\n' "$out" | sed "s/^ERR /  $RED✗$R /"; FAILED=1; fi
+
+# ---------------------------------------------------------------- roadmap/ --
+
+head_ "roadmap/ pucks"
+
+if out="$(node - roadmap <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const dir = process.argv[2];
+
+// A puck is roadmap/<slug>.md or roadmap/<slug>/README.md. roadmap/README.md is
+// the convention doc, not a puck — the aggregator skips it and so do we.
+const pucks = [];
+for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+  if (e.isFile() && e.name.endsWith(".md") && e.name !== "README.md") pucks.push(path.join(dir, e.name));
+  else if (e.isDirectory() && fs.existsSync(path.join(dir, e.name, "README.md")))
+    pucks.push(path.join(dir, e.name, "README.md"));
+}
+
+const STATUSES = ["inbox", "now", "next", "later", "done"];
+const errs = [];
+
+for (const file of pucks) {
+  const text = fs.readFileSync(file, "utf8");
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/);
+  if (!m) { errs.push(`${file}: no YAML frontmatter block`); continue; }
+
+  const fm = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const kv = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
+    if (!kv) { errs.push(`${file}: cannot parse frontmatter line: ${line}`); continue; }
+    fm[kv[1]] = kv[2].trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
+  }
+
+  for (const k of ["title", "status", "updated"]) {
+    if (!fm[k]) errs.push(`${file}: missing required \`${k}\``);
+  }
+  if (fm.status && !STATUSES.includes(fm.status))
+    errs.push(`${file}: status "${fm.status}" is not one of ${STATUSES.join(", ")}`);
+  if (fm.updated && !/^\d{4}-\d{2}-\d{2}$/.test(fm.updated))
+    errs.push(`${file}: updated should be YYYY-MM-DD — got ${fm.updated}`);
+  if (fm.tags && !/^\[.*\]$/.test(fm.tags))
+    errs.push(`${file}: tags should be an inline array like [infra] — got ${fm.tags}`);
+  if (fm.title && fm.title.includes(":") && !/^".*"$|^'.*'$/.test(m[1].match(/^title:\s*(.*)$/m)?.[1] ?? ""))
+    errs.push(`${file}: a title containing ":" must be quoted`);
+}
+
+if (!fs.existsSync(path.join(dir, "README.md")))
+  errs.push(`${dir}/README.md is missing (the convention doc every repo carries)`);
+
+if (errs.length) { for (const e of errs) console.log("ERR " + e); process.exit(1); }
+console.log(`OK ${pucks.length} puck(s) valid, convention doc present`);
+NODE
+)"; then ok "${out#OK }"; else printf '%s\n' "$out" | sed "s/^ERR /  $RED✗$R /"; FAILED=1; fi
+
+# ------------------------------------------------------------------ scripts --
+
+head_ "scripts/"
+
+for f in scripts/*; do
+  [[ -f "$f" ]] || continue
+  head -1 "$f" | grep -q '^#!.*bash' || continue
+  if bash -n "$f" 2>/dev/null; then ok "$f parses"; else bad "$f has a syntax error"; bash -n "$f" || true; fi
+  [[ -x "$f" ]] || bad "$f is not executable"
+done
+
+# ------------------------------------------------------------------ starter --
+
+if $WITH_STARTER; then
+  head_ "starter/ (via new-project)"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  # Exercising the real script rather than starter/ directly: it is the path that
+  # actually runs, and starter/ alone cannot be installed (its package.json still
+  # holds {{SLUG}} placeholders until new-project substitutes them).
+  if ./scripts/new-project ci-smoke --name "CI Smoke" --blurb "Throwaway." \
+       --skip-github --yes --dir "$tmp/ci-smoke" >"$tmp/log" 2>&1; then
+    ok "new-project scaffolds, installs, tests and builds"
+  else
+    bad "new-project failed — last 30 lines:"
+    tail -30 "$tmp/log" | sed 's/^/      /'
+  fi
+fi
+
+# --------------------------------------------------------------------- done --
+
+if [[ $FAILED -eq 0 ]]; then
+  printf '\n%s✓ all checks passed%s\n\n' "$GRN" "$R"
+else
+  printf '\n%s✗ checks failed%s\n\n' "$RED" "$R"
+  exit 1
+fi
