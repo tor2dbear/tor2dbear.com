@@ -1,5 +1,6 @@
 # Kept out of the served static bundle (assets.directory is the repo root).
 .git
+.github
 .gitignore
 .assetsignore
 wrangler.jsonc

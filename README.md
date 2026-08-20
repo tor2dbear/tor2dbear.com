@@ -55,7 +55,12 @@ production** and any other branch gets a preview URL. Nothing to run by hand.
 
 ```bash
 npx wrangler dev      # local preview
+./scripts/check       # the merge gate, run by hand
 ```
+
+`scripts/check` is what CI runs on every pull request: it validates `projects.json`,
+the roadmap pucks and the shell scripts. `./scripts/check --starter` additionally
+scaffolds a throwaway project through `new-project` and builds it.
 
 Follows the fleet flow: branch → preview → PR → merge to `main` → production. See
 [`CONVENTIONS.md`](CONVENTIONS.md#the-deploy-flow-both-patterns).

@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+#
+# check — the merge gate, runnable by hand.
+#
+#   ./scripts/check              fast checks (a second or two)
+#   ./scripts/check --starter    also scaffold a throwaway project and build it
+#
+# There is no build step here, so nothing else would notice a malformed
+# projects.json (the front page fetches it at runtime and silently degrades) or a
+# puck whose frontmatter the roadmap aggregator can't parse. That second one
+# fails in the *other* repo — tor2dbear/roadmap gates on "source(s) failed to
+# harvest" — so it has to be caught at the source, here.
+
+set -euo pipefail
+
+cd -- "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ -t 1 ]]; then
+  RED=$'\033[31m'; GRN=$'\033[32m'; B=$'\033[1m'; R=$'\033[0m'
+else
+  RED=""; GRN=""; B=""; R=""
+fi
+
+FAILED=0
+ok()   { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
+bad()  { printf '  %s✗%s %s\n' "$RED" "$R" "$*"; FAILED=1; }
+head_() { printf '\n%s%s%s\n' "$B" "$*" "$R"; }
+
+WITH_STARTER=false
+[[ "${1:-}" == "--starter" ]] && WITH_STARTER=true
+
+# ------------------------------------------------------------- projects.json --
+
+head_ "projects.json"
+
+if out="$(node - projects.json <<'NODE'
+const fs = require("fs");
+const file = process.argv[2]; // node - <file>: argv is [node, "-", file]
+const raw = fs.readFileSync(file, "utf8");
+
+let d;
+try { d = JSON.parse(raw); } catch (e) { console.log("ERR invalid JSON: " + e.message); process.exit(1); }
+
+const errs = [];
+if (!Array.isArray(d.projects)) errs.push("`projects` is not an array");
+
+const seen = new Set();
+for (const [i, p] of (d.projects || []).entries()) {
+  const at = `projects[${i}]${p && p.name ? ` (${p.name})` : ""}`;
+  // Every field the front page interpolates into a card. A missing one renders
+  // the literal string "undefined" rather than failing loudly.
+  for (const k of ["name", "url", "repo", "blurb", "color", "stack"]) {
+    if (typeof p?.[k] !== "string" || !p[k].trim()) errs.push(`${at}: missing or empty \`${k}\``);
+  }
+  if (typeof p?.url === "string") {
+    if (!/^https:\/\/[a-z0-9]+(-[a-z0-9]+)*\.tor2dbear\.com\/?$/.test(p.url))
+      errs.push(`${at}: url should be https://<slug>.tor2dbear.com — got ${p.url}`);
+    if (seen.has(p.url)) errs.push(`${at}: duplicate url ${p.url}`);
+    seen.add(p.url);
+  }
+  if (typeof p?.repo === "string" && !/^https:\/\/github\.com\/tor2dbear\/[\w.-]+$/.test(p.repo))
+    errs.push(`${at}: repo should be https://github.com/tor2dbear/<name> — got ${p.repo}`);
+  if (typeof p?.color === "string" && !/^#[0-9a-fA-F]{6}$/.test(p.color))
+    errs.push(`${at}: color should be #rrggbb — got ${p.color}`);
+}
+
+for (const k of ["portfolio", "github"]) {
+  if (typeof d.links?.[k] !== "string") errs.push(`links.${k} is missing`);
+}
+
+if (errs.length) { for (const e of errs) console.log("ERR " + e); process.exit(1); }
+console.log("OK " + d.projects.length + " projects, all fields present");
+NODE
+)"; then ok "${out#OK }"; else printf '%s\n' "$out" | sed "s/^ERR /  $RED✗$R /"; FAILED=1; fi
+
+# ---------------------------------------------------------------- roadmap/ --
+
+head_ "roadmap/ pucks"
+
+if out="$(node - roadmap <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const dir = process.argv[2];
+
+// This mirrors tor2dbear/roadmap → scripts/lib/frontmatter.mjs *exactly*. The
+// aggregator does not use a YAML library; it has its own dependency-free parser
+// for the subset the convention uses. Validating with anything stricter would
+// red-flag pucks the board harvests fine, and anything looser would let a broken
+// one through — so the semantics are copied, not approximated. If that file
+// changes, change this with it.
+function stripQuotes(s) {
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+function parseScalar(raw) {
+  const v = raw.trim();
+  if (v === "") return "";
+  if (v.startsWith("[") && v.endsWith("]")) {
+    const inner = v.slice(1, -1).trim();
+    if (inner === "") return [];
+    return inner.split(",").map((x) => stripQuotes(x.trim())).filter((x) => x !== "");
+  }
+  return stripQuotes(v);
+}
+function parseFrontmatter(text) {
+  const n = text.replace(/\r\n/g, "\n");
+  if (!n.startsWith("---\n")) return null;
+  const end = n.indexOf("\n---", 4);
+  if (end === -1) return null;
+  const data = {}, raw = {};
+  for (const line of n.slice(4, end).split("\n")) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const idx = line.indexOf(":");
+    if (idx === -1) continue; // the aggregator skips these; a dropped key surfaces
+    const key = line.slice(0, idx).trim(); //  below as a missing required field
+    if (!key) continue;
+    raw[key] = line.slice(idx + 1).trim();
+    data[key] = parseScalar(line.slice(idx + 1));
+  }
+  return { data, raw };
+}
+
+// A puck is roadmap/<slug>.md or roadmap/<slug>/README.md. roadmap/README.md is
+// the convention doc, not a puck — the aggregator skips it and so do we.
+const pucks = [];
+for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+  if (e.isFile() && e.name.endsWith(".md") && e.name !== "README.md") pucks.push(path.join(dir, e.name));
+  else if (e.isDirectory() && fs.existsSync(path.join(dir, e.name, "README.md")))
+    pucks.push(path.join(dir, e.name, "README.md"));
+}
+
+const STATUSES = ["inbox", "now", "next", "later", "done"];
+const errs = [];
+
+for (const file of pucks) {
+  const parsed = parseFrontmatter(fs.readFileSync(file, "utf8"));
+  if (!parsed) { errs.push(`${file}: no YAML frontmatter block the aggregator can read`); continue; }
+  const { data, raw } = parsed;
+
+  for (const k of ["title", "status", "updated"]) {
+    if (data[k] === undefined || data[k] === "") errs.push(`${file}: missing required \`${k}\``);
+  }
+  if (data.status && !STATUSES.includes(data.status))
+    errs.push(`${file}: status "${data.status}" is not one of ${STATUSES.join(", ")}`);
+  if (data.updated && !/^\d{4}-\d{2}-\d{2}$/.test(String(data.updated)))
+    errs.push(`${file}: updated should be YYYY-MM-DD — got ${data.updated}`);
+  if (raw.tags !== undefined && !Array.isArray(data.tags))
+    errs.push(`${file}: tags should be an inline array like [infra] — got ${raw.tags}`);
+
+  // Not a harvest failure — the parser only strips quotes when both ends match,
+  // so an unbalanced one survives into the board as a stray character. Cosmetic
+  // downstream, certainly a typo here.
+  for (const [k, v] of Object.entries(raw)) {
+    if (/^["']/.test(v) && !/^(".*"|'.*')$/.test(v))
+      errs.push(`${file}: \`${k}\` has an unbalanced quote — ${v}`);
+  }
+}
+
+if (!fs.existsSync(path.join(dir, "README.md")))
+  errs.push(`${dir}/README.md is missing (the convention doc every repo carries)`);
+
+if (errs.length) { for (const e of errs) console.log("ERR " + e); process.exit(1); }
+console.log(`OK ${pucks.length} puck(s) valid against the aggregator's parser`);
+NODE
+)"; then ok "${out#OK }"; else printf '%s\n' "$out" | sed "s/^ERR /  $RED✗$R /"; FAILED=1; fi
+
+# ------------------------------------------------------------------ scripts --
+
+head_ "scripts/"
+
+for f in scripts/*; do
+  [[ -f "$f" ]] || continue
+  head -1 "$f" | grep -q '^#!.*bash' || continue
+  if bash -n "$f" 2>/dev/null; then ok "$f parses"; else bad "$f has a syntax error"; bash -n "$f" || true; fi
+  [[ -x "$f" ]] || bad "$f is not executable"
+done
+
+# ------------------------------------------------------------------ starter --
+
+if $WITH_STARTER; then
+  head_ "starter/ (via new-project)"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  # Exercising the real script rather than starter/ directly: it is the path that
+  # actually runs, and starter/ alone cannot be installed (its package.json still
+  # holds {{SLUG}} placeholders until new-project substitutes them).
+  if ./scripts/new-project ci-smoke --name "CI Smoke" --blurb "Throwaway." \
+       --skip-github --yes --dir "$tmp/ci-smoke" >"$tmp/log" 2>&1; then
+    ok "new-project scaffolds, installs, tests and builds"
+
+    # CONVENTIONS.md requires every project repo to carry the gate. The scaffold
+    # is where new repos inherit it, so assert it arrives — and run it, since a
+    # gate that ships broken is worse than none.
+    for want in .github/workflows/pr-checks.yml scripts/check; do
+      [[ -f "$tmp/ci-smoke/$want" ]] && ok "scaffold carries $want" \
+        || bad "scaffold is missing $want (CONVENTIONS requires it)"
+    done
+    if [[ -x "$tmp/ci-smoke/scripts/check" ]]; then
+      if (cd "$tmp/ci-smoke" && ./scripts/check) >"$tmp/inner" 2>&1; then
+        ok "the scaffolded project's own gate passes"
+      else
+        bad "the scaffolded project's gate fails — last 20 lines:"
+        tail -20 "$tmp/inner" | sed 's/^/      /'
+      fi
+    else
+      bad "scaffold's scripts/check is not executable"
+    fi
+  else
+    bad "new-project failed — last 30 lines:"
+    tail -30 "$tmp/log" | sed 's/^/      /'
+  fi
+fi
+
+# --------------------------------------------------------------------- done --
+
+if [[ $FAILED -eq 0 ]]; then
+  printf '\n%s✓ all checks passed%s\n\n' "$GRN" "$R"
+else
+  printf '\n%s✗ checks failed%s\n\n' "$RED" "$R"
+  exit 1
+fi
