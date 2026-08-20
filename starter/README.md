@@ -13,7 +13,11 @@ npm install
 npm run dev       # local dev server
 npm test          # vitest
 npm run build     # type-check + build to dist/
+./scripts/check   # the merge gate, run by hand
 ```
+
+`scripts/check` is what CI runs on every pull request: it validates the roadmap
+pucks against the aggregator's parser, then runs the tests and the build.
 
 ## Deploy
 

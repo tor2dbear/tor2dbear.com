@@ -82,6 +82,46 @@ const fs = require("fs");
 const path = require("path");
 const dir = process.argv[2];
 
+// This mirrors tor2dbear/roadmap → scripts/lib/frontmatter.mjs *exactly*. The
+// aggregator does not use a YAML library; it has its own dependency-free parser
+// for the subset the convention uses. Validating with anything stricter would
+// red-flag pucks the board harvests fine, and anything looser would let a broken
+// one through — so the semantics are copied, not approximated. If that file
+// changes, change this with it.
+function stripQuotes(s) {
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+function parseScalar(raw) {
+  const v = raw.trim();
+  if (v === "") return "";
+  if (v.startsWith("[") && v.endsWith("]")) {
+    const inner = v.slice(1, -1).trim();
+    if (inner === "") return [];
+    return inner.split(",").map((x) => stripQuotes(x.trim())).filter((x) => x !== "");
+  }
+  return stripQuotes(v);
+}
+function parseFrontmatter(text) {
+  const n = text.replace(/\r\n/g, "\n");
+  if (!n.startsWith("---\n")) return null;
+  const end = n.indexOf("\n---", 4);
+  if (end === -1) return null;
+  const data = {}, raw = {};
+  for (const line of n.slice(4, end).split("\n")) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const idx = line.indexOf(":");
+    if (idx === -1) continue; // the aggregator skips these; a dropped key surfaces
+    const key = line.slice(0, idx).trim(); //  below as a missing required field
+    if (!key) continue;
+    raw[key] = line.slice(idx + 1).trim();
+    data[key] = parseScalar(line.slice(idx + 1));
+  }
+  return { data, raw };
+}
+
 // A puck is roadmap/<slug>.md or roadmap/<slug>/README.md. roadmap/README.md is
 // the convention doc, not a puck — the aggregator skips it and so do we.
 const pucks = [];
@@ -95,36 +135,34 @@ const STATUSES = ["inbox", "now", "next", "later", "done"];
 const errs = [];
 
 for (const file of pucks) {
-  const text = fs.readFileSync(file, "utf8");
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/);
-  if (!m) { errs.push(`${file}: no YAML frontmatter block`); continue; }
-
-  const fm = {};
-  for (const line of m[1].split(/\r?\n/)) {
-    if (!line.trim() || line.trimStart().startsWith("#")) continue;
-    const kv = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
-    if (!kv) { errs.push(`${file}: cannot parse frontmatter line: ${line}`); continue; }
-    fm[kv[1]] = kv[2].trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
-  }
+  const parsed = parseFrontmatter(fs.readFileSync(file, "utf8"));
+  if (!parsed) { errs.push(`${file}: no YAML frontmatter block the aggregator can read`); continue; }
+  const { data, raw } = parsed;
 
   for (const k of ["title", "status", "updated"]) {
-    if (!fm[k]) errs.push(`${file}: missing required \`${k}\``);
+    if (data[k] === undefined || data[k] === "") errs.push(`${file}: missing required \`${k}\``);
   }
-  if (fm.status && !STATUSES.includes(fm.status))
-    errs.push(`${file}: status "${fm.status}" is not one of ${STATUSES.join(", ")}`);
-  if (fm.updated && !/^\d{4}-\d{2}-\d{2}$/.test(fm.updated))
-    errs.push(`${file}: updated should be YYYY-MM-DD — got ${fm.updated}`);
-  if (fm.tags && !/^\[.*\]$/.test(fm.tags))
-    errs.push(`${file}: tags should be an inline array like [infra] — got ${fm.tags}`);
-  if (fm.title && fm.title.includes(":") && !/^".*"$|^'.*'$/.test(m[1].match(/^title:\s*(.*)$/m)?.[1] ?? ""))
-    errs.push(`${file}: a title containing ":" must be quoted`);
+  if (data.status && !STATUSES.includes(data.status))
+    errs.push(`${file}: status "${data.status}" is not one of ${STATUSES.join(", ")}`);
+  if (data.updated && !/^\d{4}-\d{2}-\d{2}$/.test(String(data.updated)))
+    errs.push(`${file}: updated should be YYYY-MM-DD — got ${data.updated}`);
+  if (raw.tags !== undefined && !Array.isArray(data.tags))
+    errs.push(`${file}: tags should be an inline array like [infra] — got ${raw.tags}`);
+
+  // Not a harvest failure — the parser only strips quotes when both ends match,
+  // so an unbalanced one survives into the board as a stray character. Cosmetic
+  // downstream, certainly a typo here.
+  for (const [k, v] of Object.entries(raw)) {
+    if (/^["']/.test(v) && !/^(".*"|'.*')$/.test(v))
+      errs.push(`${file}: \`${k}\` has an unbalanced quote — ${v}`);
+  }
 }
 
 if (!fs.existsSync(path.join(dir, "README.md")))
   errs.push(`${dir}/README.md is missing (the convention doc every repo carries)`);
 
 if (errs.length) { for (const e of errs) console.log("ERR " + e); process.exit(1); }
-console.log(`OK ${pucks.length} puck(s) valid, convention doc present`);
+console.log(`OK ${pucks.length} puck(s) valid against the aggregator's parser`);
 NODE
 )"; then ok "${out#OK }"; else printf '%s\n' "$out" | sed "s/^ERR /  $RED✗$R /"; FAILED=1; fi
 
@@ -151,6 +189,24 @@ if $WITH_STARTER; then
   if ./scripts/new-project ci-smoke --name "CI Smoke" --blurb "Throwaway." \
        --skip-github --yes --dir "$tmp/ci-smoke" >"$tmp/log" 2>&1; then
     ok "new-project scaffolds, installs, tests and builds"
+
+    # CONVENTIONS.md requires every project repo to carry the gate. The scaffold
+    # is where new repos inherit it, so assert it arrives — and run it, since a
+    # gate that ships broken is worse than none.
+    for want in .github/workflows/pr-checks.yml scripts/check; do
+      [[ -f "$tmp/ci-smoke/$want" ]] && ok "scaffold carries $want" \
+        || bad "scaffold is missing $want (CONVENTIONS requires it)"
+    done
+    if [[ -x "$tmp/ci-smoke/scripts/check" ]]; then
+      if (cd "$tmp/ci-smoke" && ./scripts/check) >"$tmp/inner" 2>&1; then
+        ok "the scaffolded project's own gate passes"
+      else
+        bad "the scaffolded project's gate fails — last 20 lines:"
+        tail -20 "$tmp/inner" | sed 's/^/      /'
+      fi
+    else
+      bad "scaffold's scripts/check is not executable"
+    fi
   else
     bad "new-project failed — last 30 lines:"
     tail -30 "$tmp/log" | sed 's/^/      /'

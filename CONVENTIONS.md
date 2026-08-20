@@ -138,6 +138,11 @@ What the workshop gates on, as the pattern to copy:
   rots silently as dependencies drift, and `new-project`'s own verification comes too
   late: you find out halfway through bootstrapping a repo.
 
+New projects inherit the gate from `starter/`, so it is there from the first commit
+rather than added later. The workshop's own gate asserts that: its smoke run checks the
+scaffold carries both files and then executes the scaffolded project's gate, because one
+that ships broken is worse than none.
+
 The same checks run locally: `./scripts/check` (add `--starter` for the slow one).
 
 ## Repo hygiene
@@ -173,7 +178,8 @@ One command, from a checkout of this repo:
 It does the whole checklist:
 
 1. Scaffolds from `starter/` — Vite + TypeScript + Vitest, `wrangler.jsonc`, `roadmap/`,
-   README — substituting the slug, name, blurb and accent color throughout.
+   README and the merge gate (`scripts/check` + `.github/workflows/pr-checks.yml`) —
+   substituting the slug, name, blurb and accent color throughout.
 2. Verifies the scaffold installs, tests and builds, before anything remote exists.
 3. Creates `tor2dbear/<slug>` on GitHub, pushes `main`, and asserts `main` really is the
    default branch.

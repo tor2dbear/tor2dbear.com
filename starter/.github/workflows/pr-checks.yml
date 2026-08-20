@@ -1,0 +1,32 @@
+name: PR checks
+
+# The merge gate. Deploys and preview URLs are NOT this workflow's job — the
+# Worker is connected to this repo through Workers Builds, which already deploys
+# main and gives every branch a preview URL with a sticky PR comment.
+#
+# See the workshop's CONVENTIONS.md → "The merge gate". No secrets, so this runs
+# on fork PRs too.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci || npm install
+      - run: ./scripts/check

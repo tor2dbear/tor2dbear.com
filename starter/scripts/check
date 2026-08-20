@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+#
+# check — this project's merge gate, runnable by hand.
+#
+#   ./scripts/check
+#
+# Two jobs: keep the roadmap pucks harvestable, and keep the project building.
+# A malformed puck fails in tor2dbear/roadmap's gate rather than here, so it has
+# to be caught at the source. See the workshop's CONVENTIONS.md → "The merge gate".
+
+set -euo pipefail
+cd -- "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ -t 1 ]]; then RED=$'\033[31m'; GRN=$'\033[32m'; B=$'\033[1m'; R=$'\033[0m'
+else RED=""; GRN=""; B=""; R=""; fi
+
+FAILED=0
+ok()  { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
+bad() { printf '  %s✗%s %s\n' "$RED" "$R" "$*"; FAILED=1; }
+
+printf '\n%sroadmap/ pucks%s\n' "$B" "$R"
+if out="$(node - roadmap <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const dir = process.argv[2];
+
+// Mirrors tor2dbear/roadmap → scripts/lib/frontmatter.mjs. The aggregator uses
+// no YAML library, just its own parser for the subset the convention allows, so
+// validating with anything stricter would reject pucks the board handles fine.
+const stripQuotes = (s) =>
+  (s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")) ? s.slice(1, -1) : s;
+function parseScalar(raw) {
+  const v = raw.trim();
+  if (v === "") return "";
+  if (v.startsWith("[") && v.endsWith("]")) {
+    const inner = v.slice(1, -1).trim();
+    return inner === "" ? [] : inner.split(",").map((x) => stripQuotes(x.trim())).filter(Boolean);
+  }
+  return stripQuotes(v);
+}
+function parseFrontmatter(text) {
+  const n = text.replace(/\r\n/g, "\n");
+  if (!n.startsWith("---\n")) return null;
+  const end = n.indexOf("\n---", 4);
+  if (end === -1) return null;
+  const data = {}, raw = {};
+  for (const line of n.slice(4, end).split("\n")) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim();
+    if (!key) continue;
+    raw[key] = line.slice(idx + 1).trim();
+    data[key] = parseScalar(line.slice(idx + 1));
+  }
+  return { data, raw };
+}
+
+if (!fs.existsSync(dir)) { console.log("ERR roadmap/ is missing — every project carries one"); process.exit(1); }
+
+const pucks = [];
+for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+  if (e.isFile() && e.name.endsWith(".md") && e.name !== "README.md") pucks.push(path.join(dir, e.name));
+  else if (e.isDirectory() && fs.existsSync(path.join(dir, e.name, "README.md")))
+    pucks.push(path.join(dir, e.name, "README.md"));
+}
+
+const STATUSES = ["inbox", "now", "next", "later", "done"];
+const errs = [];
+for (const file of pucks) {
+  const parsed = parseFrontmatter(fs.readFileSync(file, "utf8"));
+  if (!parsed) { errs.push(`${file}: no YAML frontmatter block the aggregator can read`); continue; }
+  const { data, raw } = parsed;
+  for (const k of ["title", "status", "updated"])
+    if (data[k] === undefined || data[k] === "") errs.push(`${file}: missing required \`${k}\``);
+  if (data.status && !STATUSES.includes(data.status))
+    errs.push(`${file}: status "${data.status}" is not one of ${STATUSES.join(", ")}`);
+  if (data.updated && !/^\d{4}-\d{2}-\d{2}$/.test(String(data.updated)))
+    errs.push(`${file}: updated should be YYYY-MM-DD — got ${data.updated}`);
+  if (raw.tags !== undefined && !Array.isArray(data.tags))
+    errs.push(`${file}: tags should be an inline array like [area] — got ${raw.tags}`);
+  for (const [k, v] of Object.entries(raw))
+    if (/^["']/.test(v) && !/^(".*"|'.*')$/.test(v))
+      errs.push(`${file}: \`${k}\` has an unbalanced quote — ${v}`);
+}
+if (!fs.existsSync(path.join(dir, "README.md")))
+  errs.push(`${dir}/README.md is missing (the convention doc every repo carries)`);
+
+if (errs.length) { for (const e of errs) console.log("ERR " + e); process.exit(1); }
+console.log(`OK ${pucks.length} puck(s) valid against the aggregator's parser`);
+NODE
+)"; then ok "${out#OK }"; else printf '%s\n' "$out" | sed "s/^ERR /  $RED✗$R /"; FAILED=1; fi
+
+printf '\n%sbuild%s\n' "$B" "$R"
+if npm test --silent >/dev/null 2>&1; then ok "tests pass"; else bad "npm test failed"; npm test --silent || true; fi
+if npm run build --silent >/dev/null 2>&1; then ok "builds"; else bad "npm run build failed"; npm run build --silent || true; fi
+
+if [[ $FAILED -eq 0 ]]; then printf '\n%s✓ all checks passed%s\n\n' "$GRN" "$R"
+else printf '\n%s✗ checks failed%s\n\n' "$RED" "$R"; exit 1; fi
