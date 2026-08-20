@@ -94,6 +94,28 @@ Three things that cost us time on the workshop repo, so check them:
   existing `TXT` on the same name (e.g. site verification) does not block it; an existing
   `A`/`AAAA`/`CNAME` does.
 
+### Exception: projects whose served content is built in CI
+
+Workers Builds (the git-connected build) is the default source of production deploys and
+per-branch preview URLs. But a project that **builds its served content in CI** — the
+roadmap aggregator harvests `data/` fresh from the source repos on every run — must keep
+the Worker's **Git build disconnected**, or the git build redeploys the stale *committed*
+artifact over CI's fresh one. Such a project drives everything from GitHub Actions instead
+and replicates the same flow:
+
+- **Production:** `npx wrangler deploy` from CI on push to `main` (not Workers Builds).
+- **PR preview:** a `pull_request` workflow runs `npx wrangler versions upload
+  --preview-alias pr-<number>` — a Worker *version*, never prod — and posts a **sticky PR
+  comment** with a **stable per-PR URL** (`https://pr-<number>-<name>.<subdomain>.workers.dev`)
+  that re-points at the newest version each push. This reproduces the Workers-Builds PR
+  comment from CI without reconnecting the git build.
+- **Gate + secrets:** the same workflow syntax-checks and rebuilds the artifact as the merge
+  gate; the credentialed preview is restricted to owner-authored PRs so PR-controlled tooling
+  can't read the deploy token.
+
+Reference implementation: `tor2dbear/roadmap` → `.github/workflows/sync.yml` (deploy) +
+`pr-preview.yml` (gate + preview).
+
 ## Repo hygiene
 
 Every project repo should carry:
